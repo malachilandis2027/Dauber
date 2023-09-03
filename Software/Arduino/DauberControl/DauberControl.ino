@@ -38,7 +38,7 @@ wants pins to be labeled pX, where X is the number from the GPIO label on the pi
 #define FEED_WHEEL_DIAMETER 25 // Diameter of feed wheel in [mm]
 #define STEPS_PER_REV 5370 // Steps per revolution of the feed wheel
 #define PI 3.141592
-#define TIMER_INTERVAL_US 200 // How often the stepper ISR runs in unsigned long [us]
+#define TIMER_INTERVAL_US 2000 // How often the stepper ISR runs in unsigned long [us]
 
 unsigned long countsToStep = 100; // Number of times the ISR should run before it takes a step
 unsigned long countsDuration = 0; // How many times the ISR should update before it doesn't step regardless
@@ -122,14 +122,28 @@ void setSpindlePower(int power) {
 
 // ISR to be run at the interupt frequency, this steps when necessary
 void stepperUpdateISR(unsigned int alarm_num) {
-  if (countsSinceStepped >= countsToStep && countsSinceStarted < countsDuration) { // Check to see if the ISR has run enough to warrant a step being taken AND that it should still be stepping
-    countsSinceStepped = 0; // Reset this counter
-    takeStep(currentDirection); // Take a step with the stepper motor
-  }
-  else {
-    countsSinceStepped++; // Increment the stepping counter
-    countsSinceStarted++; // Increment the duration counter
-  }
+  countsSinceStarted = countsSinceStarted + 1;
+  // if (countsSinceStepped >= countsToStep && countsSinceStarted < countsDuration) { // Check to see if the ISR has run enough to warrant a step being taken AND that it should still be stepping
+  //   countsSinceStepped = 0; // Reset this counter
+  //   if (currentDirection != lastDirection) { // First check whether the stepper is changing direction
+  //     if (currentDirection) {
+  //       digitalWrite(STP_DIR,HIGH); // Set the direction pin high (forward)
+  //     }
+  //     else {
+  //       digitalWrite(STP_DIR,LOW); // Set the direction pin low (reverse)
+  //     }
+  //   lastDirection = currentDirection; // Update the last direction
+  //   delayMicroseconds(6); // Delay as required by the drive after setting the direction pin
+  //   }
+  //   digitalWrite(STP_PUL,HIGH); // Set the pulse pin high
+  //   delayMicroseconds(3); // Delay as required by the drive
+  //   digitalWrite(STP_PUL,LOW); // Set the pulse pin low
+  //   delayMicroseconds(3); // Delay as required by the drive
+  // }
+  // else {
+  //   countsSinceStepped++; // Increment the stepping counter
+  //   countsSinceStarted++; // Increment the duration counter
+  // }
 }
 
 // ------------------------------ Setup -----------------------------
@@ -138,6 +152,7 @@ MBED_RPI_PICO_Timer ITimer(1);
 
 void setup() {
   Serial.begin(115200); // Start serial communication with laptop
+  delay(5000);
   if (ITimer.attachInterruptInterval(TIMER_INTERVAL_US, stepperUpdateISR)) {
     Serial.println("Starting stepper ISR");
   } 
@@ -149,6 +164,8 @@ void setup() {
 // ---------------------------- Main Loop  --------------------------
 
 void loop() {
+  Serial.println(countsSinceStarted);
+  delay(200);
   if (Serial.available()) { // Check to see if there is something to read
     String userInput = String(Serial.readStringUntil('\n'));
     // Begin by checking the first two characters
@@ -171,20 +188,27 @@ void loop() {
 
     // Feedrate control command processing
     else if (firstTwo == "FR") { // The characters "FR" indicate feedrate control command
-      enableStepper();
-      int durationIndex = userInput.indexOf("D"); // Find the first instance of "D", after which the duration is specified
-      if (durationIndex = -1) {
+      int durationIndex = userInput.indexOf('D'); // Find the first instance of "D", after which the duration is specified
+      if (durationIndex == -1) {
         Serial.println("Error, no \"D\" character found in feedrate control command");
       }
+      else {
+        enableStepper();
+        float feedrate = userInput.substring(2,durationIndex).toFloat(); // Get the feedrate as the float between "FR" and "D"
+        float duration = userInput.substring(durationIndex+1).toFloat(); // Get the duration as the remaining float after "D"
 
-      float feedrate = userInput.substring(2,durationIndex).toFloat(); // Get the feedrate as the float between "FR" and "D"
-      float duration = userInput.substring(durationIndex+1).toFloat(); // Get the duration as the remaining float after "D"
-
-      setStepperFeedrateDuration(feedrate, duration);
+        Serial.print("Setting stepper feedrate to ");
+        Serial.print(feedrate);
+        Serial.print(" [mm/s] and the duration to ");
+        Serial.print(duration);
+        Serial.println(" [s]");
+        countsSinceStarted = 0;
+        setStepperFeedrateDuration(feedrate, duration);
+      }
     }
 
     else if (firstThree == "off" || firstThree == "Off" || firstThree == "OFF") { // Off commands
-      Serial.print("Turning spindle and stepper off");
+      Serial.println("Turning spindle and stepper off");
       setSpindlePower(0);
       setStepperFeedrateDuration(0.0,0.0);
       disableStepper();
